@@ -965,7 +965,7 @@
     }).join('');
     var clients = $('[data-rail="clients"]');
     if (clients) clients.innerHTML = (window.MD_CLIENTS || []).map(function (img) {
-      return '<figure class="rcard rcard--shot"><span class="rcard__img"><img src="img/k/' + esc(img) + '.webp" alt="Часы М78 на руке клиента, кадр из сторис" width="600" height="750" loading="lazy"></span></figure>';
+      return '<figure class="rcard rcard--shot"><span class="rcard__img"><img src="img/k/' + esc(img) + '.webp" alt="Часы М78 на руке клиента" width="600" height="750" loading="lazy"></span></figure>';
     }).join('');
     $$('[data-rail-nav]').forEach(function (nav) {
       var rail = $('[data-rail="' + nav.getAttribute('data-rail-nav') + '"]'), btns = $$('button', nav);

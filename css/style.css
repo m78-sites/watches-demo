@@ -303,7 +303,7 @@ em { font-style: normal; color: var(--gold); }
 .stats__head h2 { margin: 0; font-size: clamp(36px, 4.45vw, 64px); font-weight: 600; line-height: 1.06; letter-spacing: -0.009em; }
 .stats__p { margin: var(--s5) 0 0; max-width: 760px; font-size: var(--t-intro); line-height: 1.42; color: var(--muted); font-weight: 400; }
 .stats__p b { color: var(--ink); font-weight: 600; }
-.stats__row { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s7); margin-top: clamp(48px, 6vw, 80px); }
+.stats__row { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--s7); margin-top: clamp(48px, 6vw, 80px); }
 .stat + .stat { border-left: 1px solid var(--line); padding-left: var(--s7); }
 .stat__l { font-size: clamp(24px, 2.3vw, 32px); font-weight: 600; line-height: 1.12; color: var(--gold); }
 .stat__u { min-height: 1.3em; margin-top: var(--s5); font-size: 14px; color: var(--muted); }
