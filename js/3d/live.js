@@ -9,6 +9,7 @@ import { GLTFLoader } from './jsm/loaders/GLTFLoader.js';
 const D = THREE.MathUtils.degToRad, lerp = THREE.MathUtils.lerp;
 
 function stage(canvas) {
+  const box = { w: 1, h: 1 };
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: 'high-performance' });
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.setClearColor(0x000000, 1);
@@ -22,8 +23,8 @@ function stage(canvas) {
     model = buildModel(SPECS[id]); scene.add(model); return model;
   }
   function size() {
-    const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1; box.w = w; box.h = h;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.setSize(w, h, false);
     cam.aspect = w / h;
     // часы целиком помещаются и в узкий, и в широкий кадр
@@ -36,7 +37,7 @@ function stage(canvas) {
     model.rotation.set(D(rx), D(ry), D(rz), 'XZY');
     cam.position.set(0, y || 0, d || dist); cam.lookAt(0, y || 0, 0);
   }
-  return { renderer, scene, cam, setModel, size, render, pose, get model() { return model; } };
+  return { renderer, scene, cam, setModel, size, render, pose, box, get model() { return model; } };
 }
 
 /* Идея 1: часы поворачиваются, пока листаешь. progress 0..1 задаёт страница. */
@@ -100,7 +101,8 @@ export function mountDrag(canvas, id) {
 
 /* «Покрутить в 3D»: готовая 3D-модель часов (glb), пальцем или мышью, с инерцией.
    Модель приводим к виду «циферблат на камеру, 12 часов вверх» и к высоте 100 единиц. */
-export function mountDragGlb(canvas, url) {
+export function mountDragGlb(canvas, url, area) {
+  const el = area || canvas;
   const st = stage(canvas); st.size();
   const outer = new THREE.Group(), fix = new THREE.Group(); outer.add(fix); fix.rotation.y = D(-37);
   let alive = true, loaded = false;
@@ -120,14 +122,18 @@ export function mountDragGlb(canvas, url) {
     if (drag || Math.abs(vx) > 0.01 || Math.abs(vy) > 0.01) raf = requestAnimationFrame(frame);
   }
   function kick() { if (!raf && loaded) raf = requestAnimationFrame(frame); }
-  canvas.addEventListener('pointerdown', (e) => { drag = true; px = e.clientX; py = e.clientY; vx = vy = 0; canvas.setPointerCapture(e.pointerId); kick(); });
-  canvas.addEventListener('pointermove', (e) => {
+  const onDown = (e) => {
+    if (e.button > 0 || e.target.closest('button, a')) return;   // кнопки и ссылки в окне — не для поворота
+    drag = true; px = e.clientX; py = e.clientY; vx = vy = 0; try { el.setPointerCapture(e.pointerId); } catch (er) {} kick();
+  };
+  el.addEventListener('pointerdown', onDown);
+  el.addEventListener('pointermove', (e) => {
     if (!drag) return;
     const dx = e.clientX - px, dy = e.clientY - py; px = e.clientX; py = e.clientY;
     vy = dx * 0.45; vx = dy * 0.3; ry += vy; rx = clampX(rx + vx); kick();
   });
   const up = () => { drag = false; kick(); };
-  canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
   canvas.addEventListener('keydown', (e) => {
     const k = { ArrowLeft: [0, -12], ArrowRight: [0, 12], ArrowUp: [-8, 0], ArrowDown: [8, 0] }[e.key];
     if (!k) return; e.preventDefault(); rx = clampX(rx + k[0]); ry += k[1]; kick();
@@ -137,7 +143,7 @@ export function mountDragGlb(canvas, url) {
   return {
     ready,
     setModel() {},
-    destroy() { alive = false; ro.disconnect(); st.renderer.dispose(); },
+    destroy() { alive = false; ro.disconnect(); el.removeEventListener('pointerdown', onDown); drag = false; st.renderer.dispose(); },
   };
 }
 
@@ -183,8 +189,8 @@ export function mountSpinGlb(canvas, url) {
     pts[2] = low ? new THREE.Vector3((low.min.x + low.max.x) / 2 + 6, Math.max(low.min.y, -34), low.max.z - 1) : new THREE.Vector3(6, -30, 4);
     U = fadeBehind(m, -2, -30);
     st.renderer.clippingPlanes = [clip];
-    loaded = true;
-  });
+    return st.renderer.compileAsync(st.scene, st.cam).catch(() => {});
+  }).then(() => { loaded = true; last = -1; draw(0); });   // первый кадр сразу: текстуры и браслет уходят в видеокарту заранее, а не посреди прокрутки
   // ключевые позы: вполоборота слева → прямо (безель) → вполоборота с головкой → наклон (браслет)
   const K = [
     { p: 0, r: [4, 34, 0], d: 270 },
@@ -204,18 +210,18 @@ export function mountSpinGlb(canvas, url) {
     outer.updateMatrixWorld(true);
     U.uRootInv.value.copy(outer.matrixWorld).invert(); clip.copy(clipLocal).applyMatrix4(outer.matrixWorld);
     /* на узком экране часы мельче — по бокам остаётся место для подписей выносок */
-    const zoom = canvas.clientWidth < 600 ? 1.42 : 1;
+    const zoom = st.box.w < 600 ? 1.42 : 1;
     st.cam.position.set(0, 0, lerp(a.d, b.d, t) * zoom); st.cam.lookAt(0, 0, 0); st.render();
   }
   const v = new THREE.Vector3();
   function project(p3) {
     v.copy(p3).applyMatrix4(outer.matrixWorld).project(st.cam);
-    return { x: (v.x + 1) / 2 * canvas.clientWidth, y: (1 - v.y) / 2 * canvas.clientHeight };
+    return { x: (v.x + 1) / 2 * st.box.w, y: (1 - v.y) / 2 * st.box.h };
   }
   function anchor(i) {
     if (!loaded || !pts[i]) return null;
     const a = project(pts[i]), c = project(new THREE.Vector3(0, 0, 0)), cr = project(pts[1]);
-    a.cx = c.x; a.cy = c.y; a.r = Math.max(Math.abs(cr.x - c.x), canvas.clientHeight * 0.12); return a;
+    a.cx = c.x; a.cy = c.y; a.r = Math.max(Math.abs(cr.x - c.x), st.box.h * 0.12); a.w = st.box.w; a.h = st.box.h; return a;
   }
   const ro = new ResizeObserver(() => { st.size(); last = -1; });
   ro.observe(canvas);

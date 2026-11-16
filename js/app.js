@@ -17,6 +17,8 @@
   var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   var phone = window.matchMedia('(max-width: 833px)');
   var hasIO = 'IntersectionObserver' in window;
+  /* метка версии этого файла (?v=…) — ей же подгружаем модуль 3D, чтобы после обновления не брался старый из кэша */
+  var VER = (function () { var sc = document.currentScript, m = sc && sc.src.match(/\?v=(\d+)/); return m ? '?v=' + m[1] : ''; })();
   function safe(name, fn) { try { fn(); } catch (e) { if (window.console) console.error('MASDELLA:', name, e); } }
   function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
   function easeInOut(t) { return -(Math.cos(Math.PI * t) - 1) / 2; }
@@ -121,14 +123,15 @@
       function stop() { clearTimeout(stall); v.removeAttribute('src'); try { v.load(); } catch (e) {} done(); }
       v.addEventListener('playing', function () { started = true; clearTimeout(stall); });
       /* начал играть и встал на подгрузке — не держим часы посреди поворота */
-      v.addEventListener('waiting', function () { if (started) { clearTimeout(stall); stall = setTimeout(stop, 1500); } });
+      v.addEventListener('waiting', function () { if (started) { clearTimeout(stall); stall = setTimeout(stop, 3000); } });
+      v.addEventListener('playing', function () { clearTimeout(stall); });
       v.addEventListener('ended', done);
       v.addEventListener('error', done);
       function start() {
         v.preload = 'auto'; v.src = url;
         var p = v.play(); if (p && p.catch) p.catch(stop);
         /* сеть медленная — останавливаем загрузку и показываем готовый кадр */
-        setTimeout(function () { if (!started) stop(); }, 3500);
+        setTimeout(function () { if (!started) stop(); }, 8000);
       }
       if (box.getAttribute('data-once') === 'now' || !hasIO) { start(); return; }
       var o = new IntersectionObserver(function (es) {
@@ -584,22 +587,26 @@
     var sec = $('[data-spin]'); if (!sec) return;
     if (reduceMotion.matches || !window.WebGLRenderingContext || !window.ResizeObserver || !hasIO) { sec.classList.add('is-static'); return; }
     var canvas = $('.spin__canvas', sec), steps = $$('[data-spin-step]', sec), lines = $$('[data-call-line]', sec), tags = $$('[data-call-tag]', sec);
-    var api = null, loading = false, k = -1;
+    var api = null, loading = false, k = -1, tagSize = [];
+    onWidthChange(function () { tagSize = []; });
     function load() {
       if (loading) return; loading = true;
-      import('./3d/live.js').then(function (m) {
+      import('./3d/live.js' + VER).then(function (m) {
         api = m.mountSpinGlb(canvas, 'models/rolex.glb');
         api.ready.then(function () { sec.classList.add('is-live'); requestTick(); }, function (e) { if (window.console) console.error('MASDELLA: spin', e); sec.classList.add('is-static'); });
       }).catch(function (e) { if (window.console) console.error('MASDELLA: spin', e); sec.classList.add('is-static'); });
     }
     new IntersectionObserver(function (es) { if (es[0].isIntersecting) load(); }, { rootMargin: '900px 0px' }).observe(sec);
+    var idle = window.requestIdleCallback || function (fn) { return setTimeout(fn, 1); };
+    function early() { setTimeout(function () { idle(load, { timeout: 4000 }); }, 2500); }
+    if (document.readyState === 'complete') early(); else window.addEventListener('load', early);
     function callout(i, on) {
       var line = lines[i], tag = tags[i]; if (!line || !tag) return;
       line.classList.toggle('is-on', on); tag.classList.toggle('is-on', on);
       if (!on || !api) return;
       var a = api.anchor(i); if (!a) return;
       /* линия от детали к подписи; подпись всегда снаружи часов и внутри кадра */
-      var w = canvas.clientWidth, h = canvas.clientHeight, tw = tag.offsetWidth, th = tag.offsetHeight, narrow = w < 600;
+      var w = a.w || canvas.clientWidth, h = a.h || canvas.clientHeight, narrow = w < 600, sz = tagSize[i] || (tagSize[i] = { w: tag.offsetWidth, h: tag.offsetHeight }), tw = sz.w, th = sz.h;
       var R = a.r + (narrow ? 8 : 18), run = narrow ? 12 : Math.min(48, w * 0.07);
       var roomR = w - (a.cx + R + run + tw + 12), roomL = a.cx - R - run - tw - 12;
       var side = i === 1 ? 1 : (a.x < a.cx ? -1 : 1);
@@ -642,17 +649,21 @@
     el.innerHTML = el.textContent.split('\u00b7').map(function (t) {
       var name = t.trim(); return name ? '<span class="band__w">' + esc(name) + '</span>' : '';
     }).filter(Boolean).join('\u00a0\u00b7 ') + '\u00a0\u00b7';
-    var words = $$('.band__w', el);
+    var words = $$('.band__w', el), pos = [], vw = 0, span = 0;
+    function measure() {
+      vw = box.clientWidth; span = Math.max(el.scrollWidth - vw, 0);
+      pos = words.map(function (w) { return { c: w.offsetLeft + w.offsetWidth / 2, h: w.offsetWidth / 2, lit: -1 }; });
+    }
+    measure(); onWidthChange(measure);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { measure(); requestTick(); });
     onFrame(function (y, vh) {
       var r = box.getBoundingClientRect(); if (r.bottom < 0 || r.top > vh) return;
-      var p = clamp((vh - r.top) / (vh + r.height), 0, 1);
-      var span = Math.max(el.scrollWidth - box.clientWidth, 0);
-      el.style.setProperty('--x', (-p * span * 0.75).toFixed(1) + 'px');
-      var vw = box.clientWidth, mid = vw / 2;
-      words.forEach(function (w) {
-        var b = w.getBoundingClientRect(), d = Math.abs(b.left + b.width / 2 - mid) / (vw * 0.42 + b.width / 2);
-        var lit = clamp(1 - d, 0, 1); lit = lit * lit * (3 - 2 * lit);
-        w.style.setProperty('--lit', lit.toFixed(3));
+      var p = clamp((vh - r.top) / (vh + r.height), 0, 1), x = -p * span * 0.75, mid = vw / 2;
+      el.style.setProperty('--x', x.toFixed(1) + 'px');
+      words.forEach(function (w, i) {
+        var q = pos[i], d = Math.abs(q.c + x - mid) / (vw * 0.42 + q.h);
+        var lit = clamp(1 - d, 0, 1); lit = Math.round(lit * lit * (3 - 2 * lit) * 40) / 40;
+        if (lit !== q.lit) { q.lit = lit; w.style.setProperty('--lit', lit.toFixed(3)); }
       });
     });
   });
@@ -902,10 +913,10 @@
       liveCanvas = document.createElement('canvas'); liveCanvas.className = 'view__live'; liveCanvas.tabIndex = 0;
       liveCanvas.setAttribute('role', 'img'); liveCanvas.setAttribute('aria-label', '3D-модель Rolex Day-Date. Тяните или нажимайте стрелки, чтобы повернуть');
       stage.appendChild(liveCanvas);
-      import('./3d/live.js').then(function (m) {
+      import('./3d/live.js' + VER).then(function (m) {
         loading3d = false;
         if (!view.classList.contains('is-live')) { if (liveCanvas) liveCanvas.remove(); return; }
-        live = m.mountDragGlb(liveCanvas, 'models/rolex.glb'); liveCanvas.focus({ preventScroll: true });
+        live = m.mountDragGlb(liveCanvas, 'models/rolex.glb', view); liveCanvas.focus({ preventScroll: true });
         /* модель весит несколько мегабайт — пока грузится, так и пишем */
         dragHint.textContent = 'Загружаем 3D…';
         live.ready.then(function () { dragHint.textContent = 'Тяните, чтобы повернуть'; setTimeout(function () { dragHint.hidden = true; }, 3500); },

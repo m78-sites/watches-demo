@@ -670,3 +670,8 @@ em { font-style: normal; color: var(--gold); }
 
 /* лента марок: название в середине экрана заливается светом, остальные — контур */
 .band__w { color: rgba(245, 242, 236, calc(var(--lit, 0) * .96)); -webkit-text-stroke-color: rgba(245, 242, 236, calc(.24 + var(--lit, 0) * .5)); }
+
+/* «Покрутить в 3D»: тянуть можно в любой точке окна; вертикальный свайп на телефоне листает страницу */
+.view.is-live { cursor: grab; touch-action: pan-y; -webkit-user-select: none; user-select: none; }
+.view.is-live:active { cursor: grabbing; }
+.view.is-live button, .view.is-live a { cursor: pointer; }
